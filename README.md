@@ -1,7 +1,3 @@
-Here is a comprehensive `README.md` file for your system. It explains the architecture, prerequisites, setup instructions, and how to run the batch processing pipeline.
-
-***
-
 # 🔍 AI-Powered PCB Defect Inspection Agent
 
 This project is an autonomous multi-agent framework built with **LangGraph** to inspect Printed Circuit Boards (PCBs) for manufacturing defects. It leverages **Local Vision-Language Models (LLaVA)**, **Local LLMs (Llama 3.1)**, and a **Vector Database (Qdrant)** to perform visual inspection, retrieve historical failure contexts, and reason through physical measurements—all without sending sensitive manufacturing data to the cloud.
