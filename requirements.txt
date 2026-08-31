@@ -1,0 +1,14 @@
+# Orchestration & Workflow
+langgraph>=0.2.0
+
+# Local AI Models (Ollama API)
+ollama>=0.3.0
+
+# Vector Database (Memory & Search)
+qdrant-client>=1.13.0
+
+# Image Processing
+pillow>=10.0.0
+
+# Optional: If you ever switch back or benchmark with OpenAI
+openai>=1.0.0
