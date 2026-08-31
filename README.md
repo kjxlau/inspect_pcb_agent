@@ -31,7 +31,7 @@ Prototype Code/
     ├── __init__.py
     ├── models/
     │   ├── __init__.py
-    │   └── model_registry.py    # Ollama integrations (LLaVA & Llama) & System Mocks
+    │   └── model_registry.py    # Ollama integrations (LLaVA & Llama)
     │
     └── data/
         ├── __init__.py
