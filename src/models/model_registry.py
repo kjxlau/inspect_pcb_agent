@@ -3,29 +3,30 @@ import io
 import os
 import json
 import logging
-import ollama
+from dotenv import load_dotenv
 from PIL import Image
 from openai import OpenAI
+import ollama
 
 # Load .env variables into os.environ automatically
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# ── OpenAI Reasoning Model ──────────────────────────────
-
 class OpenAIReasoningModel:
     """Uses OpenAI GPT-4o for high-precision diagnostic reasoning and self-check."""
     def __init__(self, model_name: str = "gpt-4o"):
         self.model_name = model_name
-        # Automatically loads OPENAI_API_KEY from environment variables
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "OPENAI_API_KEY is not set. Please set it in your .env file or environment variables."
+            )
+        self.client = OpenAI(api_key=api_key)
 
     def query(self, prompt: str, require_json: bool = True) -> str:
         logger.info(f"Querying OpenAI ({self.model_name}) for reasoning...")
-        
         kwargs = {"response_format": {"type": "json_object"}} if require_json else {}
-        
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=[
