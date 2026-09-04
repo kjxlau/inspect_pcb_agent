@@ -1,9 +1,44 @@
+# src/models/model_registry.py
 import io
+import os
+import json
 import logging
 import ollama
 from PIL import Image
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
+
+# ── OpenAI Reasoning Model (Replaces Llama 3.1) ──────────────────────────────
+
+class OpenAIReasoningModel:
+    """Uses OpenAI GPT-4o for high-precision diagnostic reasoning and self-check."""
+    def __init__(self, model_name: str = "gpt-4o"):
+        self.model_name = model_name
+        # Automatically loads OPENAI_API_KEY from environment variables
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    def query(self, prompt: str, require_json: bool = True) -> str:
+        logger.info(f"Querying OpenAI ({self.model_name}) for reasoning...")
+        
+        kwargs = {"response_format": {"type": "json_object"}} if require_json else {}
+        
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a master PCB Failure Analysis Engineer. You analyze evidence strictly and output valid JSON."
+                },
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            **kwargs
+        )
+        return response.choices[0].message.content or "{}"
+
+
+# ── Vision Model (Local LLaVA via Ollama) ───────────────────────────────────
 
 class LocalLLaVAModel:
     """Vision-Language Model using local LLaVA via Ollama."""
@@ -15,7 +50,7 @@ class LocalLLaVAModel:
         image.convert("RGB").save(buffered, format="JPEG")
         image_bytes = buffered.getvalue()
 
-        logger.info(f"Querying Ollama (Model: {self.model_name}) for visual description...")
+        logger.info(f"Querying Ollama ({self.model_name}) for visual description...")
         response = ollama.generate(
             model=self.model_name,
             prompt=prompt,
@@ -25,48 +60,22 @@ class LocalLLaVAModel:
         return response.get('response', '')
 
 
-class LocalReasoningModel:
-    """Text-only Reasoning Model using local Llama via Ollama."""
-    def __init__(self, model_name: str = "llama3.1"):
-        self.model_name = model_name
-
-    def query(self, prompt: str, require_json: bool = False) -> str:
-        kwargs = {"format": "json"} if require_json else {}
-        logger.info(f"Querying Ollama (Model: {self.model_name}) for reasoning...")
-        response = ollama.generate(
-            model=self.model_name,
-            prompt=prompt,
-            options={"temperature": 0.1},
-            **kwargs
-        )
-        return response.get('response', '{}')
-
-
-# --- Mocks for your other systems ---
 class MockDetector:
     def detect(self, image):
         return {"defects": [{"box": [10, 10, 50, 50], "class": "anomaly"}]}
 
 class MockImageEncoder:
     def encode(self, image):
-        return [0.0] * 512 # Dummy embedding vector
+        return [0.0] * 512
 
-class MockCaseDB:
-    def query(self, component):
-        return {"ipc_standard": "IPC-A-610 Class 3"}
 
-class MockMeasurementSystem:
-    def get_data(self, board_id, component_ref):
-        return {"resistance_ohms": 99999, "height_um": 0} # Example: open circuit
-
+# ── Registry ─────────────────────────────────────────────────────────────────
 
 class ModelRegistry:
     def __init__(self):
         self.llava = LocalLLaVAModel(model_name="llava")
-        self.reasoning_llm = LocalReasoningModel(model_name="llama3.1")
+        self.reasoning_llm = OpenAIReasoningModel(model_name="gpt-4o")
         self.pcb_detector = MockDetector()
         self.image_encoder = MockImageEncoder()
-        self.case_db = MockCaseDB()
-        self.measurement_system = MockMeasurementSystem()
 
 registry = ModelRegistry()
