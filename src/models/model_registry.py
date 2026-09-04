@@ -7,9 +7,12 @@ import ollama
 from PIL import Image
 from openai import OpenAI
 
+# Load .env variables into os.environ automatically
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
-# ── OpenAI Reasoning Model (Replaces Llama 3.1) ──────────────────────────────
+# ── OpenAI Reasoning Model ──────────────────────────────
 
 class OpenAIReasoningModel:
     """Uses OpenAI GPT-4o for high-precision diagnostic reasoning and self-check."""
