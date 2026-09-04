@@ -1,7 +1,3 @@
-Here is the updated, production-ready **`README.md`** incorporating **OpenAI (GPT-4o)** for reasoning, the **Model Context Protocol (MCP)** tool layer, the **7-class defect taxonomy**, **automated AOI filename metadata parsing**, and the **Human-in-the-Loop (HITL)** triage workflow.
-
-***
-
 # 🔍 AI-Powered PCB Defect Inspection Agent
 
 An industrial-grade, multi-agent inspection pipeline built on **LangGraph**, combining **Local Vision-Language Models (LLaVA)**, **OpenAI (GPT-4o)** reasoning, **Model Context Protocol (MCP)** standardized tool servers, and **Qdrant Vector RAG** for root-cause analysis and automated quality assurance on Surface Mount Technology (SMT) production lines.
