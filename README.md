@@ -1,12 +1,22 @@
+Here is the updated, production-ready **`README.md`** incorporating **OpenAI (GPT-4o)** for reasoning, the **Model Context Protocol (MCP)** tool layer, the **7-class defect taxonomy**, **automated AOI filename metadata parsing**, and the **Human-in-the-Loop (HITL)** triage workflow.
+
+***
+
 # 🔍 AI-Powered PCB Defect Inspection Agent
 
-This project is an autonomous multi-agent framework built with **LangGraph** to inspect Printed Circuit Boards (PCBs) for manufacturing defects. It leverages **Local Vision-Language Models (LLaVA)**, **Local LLMs (Llama 3.1)**, and a **Vector Database (Qdrant)** to perform visual inspection, retrieve historical failure contexts, and reason through physical measurements—all without sending sensitive manufacturing data to the cloud.
+An industrial-grade, multi-agent inspection pipeline built on **LangGraph**, combining **Local Vision-Language Models (LLaVA)**, **OpenAI (GPT-4o)** reasoning, **Model Context Protocol (MCP)** standardized tool servers, and **Qdrant Vector RAG** for root-cause analysis and automated quality assurance on Surface Mount Technology (SMT) production lines.
 
-## ✨ Features
-* **100% Local & Private:** Uses Ollama to run AI models entirely on your local machine. No intellectual property leaves the factory.
-* **LangGraph Orchestration:** Utilizes a state-graph architecture to route PCB data through specialized "Agent Nodes" sequentially.
-* **Vector-Based RAG (Retrieval-Augmented Generation):** Automatically searches an in-memory Qdrant database for historically similar defects to aid in root-cause analysis.
-* **7-Class Defect Taxonomy:** Capable of detecting:
+---
+
+## ✨ Key Features
+
+* **LangGraph Orchestration:** Deterministic multi-node state graph coordinating context retrieval, visual inspection, physical telemetry grounding, and self-check verification.
+* **Model Context Protocol (MCP):** Decoupled, standardized tool layer (`pcb_mcp_server.py`) serving Qdrant vector search, IPC standard lookup, and ICT measurement telemetry.
+* **Hybrid AI Architecture:**
+  * **Local LLaVA (via Ollama):** Inspects PCB component ROI images on-premise without exposing raw defect images.
+  * **OpenAI (GPT-4o):** Performs structured cross-evidence reasoning, physical grounding, and strict JSON output generation.
+* **Qdrant In-Memory Vector RAG:** Retrieves historically similar past defect precedents using cosine similarity to assist in root-cause diagnosis.
+* **7-Class Defect Taxonomy:**
   1. `missing part`
   2. `shifted`
   3. `foreign material`
@@ -14,6 +24,65 @@ This project is an autonomous multi-agent framework built with **LangGraph** to 
   5. `solder insufficient`
   6. `wrong part`
   7. `no defect`
+* **Automated AOI Dataset Parsing & Benchmarking:** Recursively scans nested AOI machine exports, extracts component references (`C636`, `U12`, etc.) and ground-truth labels directly from filenames, and generates real-time accuracy metrics.
+* **Human-in-the-Loop (HITL) Triage:** Automatically flags contradictions, low-confidence scores, and ground-truth mismatches for Quality Assurance (QA) engineer review.
+
+---
+
+## 🏗️ System Architecture & Workflow
+
+```mermaid
+flowchart TD
+    %% Inputs
+    subgraph Ingestion ["1. Data Ingestion & Metadata Parsing"]
+        A["AOI Defect ROI Image<br/>+ Extracted Metadata<br/><i>(Board ID, Component Ref, Ground Truth)</i>"]
+    end
+
+    %% LangGraph Pipeline
+    subgraph LangGraph ["2. LangGraph Agentic Pipeline"]
+        direction TD
+        START_NODE((START)) --> Tool1["Node 1: Context Retrieval<br/><code>tool1_context_retrieval_node</code>"]
+        Tool1 --> Tool2["Node 2: Visual Evidence<br/><code>tool2_visual_evidence_node</code>"]
+        Tool2 --> Tool3["Node 3: Measurement Evidence<br/><code>tool3_measurement_evidence_node</code>"]
+        Tool3 --> Tool4["Node 4: Reasoning & Grounding<br/><code>tool4_reasoning_and_grounding_node</code>"]
+        Tool4 --> END_NODE((END))
+    end
+
+    %% MCP Tool Server Layer
+    subgraph MCP_Server ["3. Model Context Protocol (MCP) Server Layer"]
+        Qdrant[("Qdrant Vector DB<br/><i>(Historical Defect Cases)</i>")]
+        IPC_DB[("IPC Standards DB<br/><i>(IPC-A-610 Class 3)</i>")]
+        ICT_System["ICT / AOI Laser Telemetry<br/><i>(Resistance, Height, Solder Vol)</i>"]
+    end
+
+    %% AI Models
+    subgraph AI_Models ["4. AI Model Registry"]
+        LLaVA_Model["Local LLaVA VLM (Ollama)<br/><i>(Visual Morphology Extraction)</i>"]
+        OpenAI_Model["OpenAI GPT-4o<br/><i>(Structured Reasoning & Grounding)</i>"]
+    end
+
+    %% Wiring
+    Ingestion --> START_NODE
+    Tool1 <-->|"MCP Tool Call"| Qdrant
+    Tool1 <-->|"MCP Tool Call"| IPC_DB
+    Tool2 <-->|"Visual Prompt"| LLaVA_Model
+    Tool3 <-->|"MCP Tool Call"| ICT_System
+    Tool4 <-->|"Structured Prompt & Self-Check"| OpenAI_Model
+
+    %% Post-Processing & HITL
+    subgraph HITL ["5. Evaluation & Human-in-the-Loop (HITL)"]
+        EvalCheck{"Decision Gate:<br/>• Prediction == Ground Truth?<br/>• Self-Check Passed?<br/>• Confidence >= Threshold?"}
+        AutoPass["✅ Automated Disposition<br/>• Log to MES<br/>• Update SMT Yield"]
+        HumanReview["⚠️ Flag for Human Review<br/>(QA / Failure Analysis Engineer)"]
+        QdrantFeedback["Update Qdrant Vector Store<br/><i>(Feedback Loop for Future RAG)</i>"]
+    end
+
+    END_NODE --> EvalCheck
+    EvalCheck -- "MATCH & Validated" --> AutoPass
+    EvalCheck -- "MISMATCH / Contradiction" --> HumanReview
+    HumanReview -->|"Engineer Verified"| QdrantFeedback
+    QdrantFeedback -.->|"Continuous Learning"| Qdrant
+```
 
 ---
 
@@ -22,104 +91,128 @@ This project is an autonomous multi-agent framework built with **LangGraph** to 
 ```text
 Prototype Code/
 │
-├── inputs/                      # Folder containing raw PCB .png images
-├── metadata.csv                 # (Optional) Maps images to specific components/symptoms
-├── main.py                      # Main script to batch process images
-├── agent.py                     # LangGraph workflow, State definition, and Prompts
+├── inputs/                      # Nested AOI export dataset (<BoardAssembly>/Body/Passed/)
+├── inspection_results.json      # Output report generated after evaluation
+├── requirements.txt             # Python dependencies
+├── main.py                      # Batch runner, metadata parser & accuracy evaluator
+├── agent.py                     # LangGraph StateGraph definition, nodes & prompts
 │
 └── src/
     ├── __init__.py
+    ├── mcp/
+    │   ├── __init__.py
+    │   └── pcb_mcp_server.py    # FastMCP Tool Server (Qdrant, Standards, ICT)
+    │
     ├── models/
     │   ├── __init__.py
-    │   └── model_registry.py    # Ollama integrations (LLaVA & Llama)
+    │   └── model_registry.py    # Model bindings (Local LLaVA & OpenAI GPT-4o)
     │
     └── data/
         ├── __init__.py
-        └── qdrant_store.py      # Local In-Memory Vector DB for historical context
+        └── qdrant_store.py      # Qdrant in-memory vector database client
 ```
 
 ---
 
-## ⚙️ How the Pipeline Works
+## ⚙️ How the LangGraph Nodes Work
 
-The system passes a `PCBInspectionState` dictionary through 4 primary Agent Nodes via LangGraph:
+1. **Tool 1: Context Retrieval (`tool1_context_retrieval_node`):**
+   Calls the MCP server (`search_historical_defects` and `get_ipc_standards`) to retrieve past failure modes and IPC tolerance criteria for the target component.
+2. **Tool 2: Visual Evidence (`tool2_visual_evidence_node`):**
+   Sends the ROI image to local LLaVA with a prompt describing physical morphology across the 7 defect classes.
+3. **Tool 3: Measurement Evidence (`tool3_measurement_evidence_node`):**
+   Queries the MCP server (`get_ict_measurements`) to fetch In-Circuit Test (resistance, open/short) and laser height profiles.
+4. **Tool 4: Reasoning & Grounding (`tool4_reasoning_and_grounding_node`):**
+   Passes aggregated evidence to **OpenAI GPT-4o**. The model performs a consistency self-check (e.g., verifying that a "missing part" diagnosis is supported by open-circuit/0-height readings) and returns a validated JSON report.
 
-1. **Tool 1: Context Retrieval (`qdrant_store.py`)** 
-   Takes the target component name and finds visually similar historical defect cases in the vector database to establish precedents.
-2. **Tool 2: Visual Evidence (`model_registry.py` -> `LLaVA`)** 
-   Passes the image to a Local Vision Model (LLaVA) configured with a strict prompt to identify morphology and classify the visual anomaly.
-3. **Tool 3: Measurement Evidence** 
-   Queries backend databases (simulated) for physical/electrical measurements (e.g., In-Circuit Test resistance, 3D AOI height).
-4. **Tool 4: Reasoning & Grounding (`model_registry.py` -> `Llama 3.1`)** 
-   Synthesizes the visual description, historical context, and physical measurements. It cross-checks visual claims against physical data to detect contradictions and outputs a final JSON diagnosis.
-```
-┌─────────────────────────────────────────────────────────┐
- │                   LangGraph Workflow                    │
- │                                                         │
- │  [Tool 1: Context]  ───┐                                │
- │  [Tool 2: Visual]   ───┼──► OpenAI (GPT-4o Reasoning)  │
- │  [Tool 3: Measure]  ───┘   (Structured JSON Output)     │
- └─────────────┬───────────────────────────────────────────┘
-               │ Calls via MCP Protocol
- ┌─────────────▼───────────────────────────────────────────┐
- │                    PCB MCP Server                       │
- │  • search_historical_defects (Qdrant Vector RAG)        │
- │  • get_ipc_standards (Case DB)                          │
- │  • get_ict_measurements (ICT / Laser Profile System)    │
- └─────────────────────────────────────────────────────────┘
-```
 ---
 
 ## 🚀 Setup & Installation
 
-### 1. Install Prerequisites
-* Python 3.9+
-* [Ollama](https://ollama.com/) (Installed and running on your local machine)
+### 1. Prerequisites
+* Python 3.10+
+* [Ollama](https://ollama.com/) running locally
+* An **OpenAI API Key**
 
-### 2. Download Local AI Models
-Open your terminal / command prompt and pull the required models into Ollama:
+### 2. Pull the Local Vision Model
+In your terminal, pull the LLaVA model into Ollama:
 ```bash
 ollama pull llava
 ```
 
 ### 3. Install Python Dependencies
-Run the following command to install the required Python libraries:
 ```bash
-pip install langgraph qdrant-client ollama pillow
+pip install -r requirements.txt
+```
+
+*(Contents of `requirements.txt`: `langgraph`, `openai`, `mcp`, `ollama`, `qdrant-client`, `pillow`)*
+
+### 4. Configure Your OpenAI API Key
+
+**Windows Command Prompt:**
+```cmd
+set OPENAI_API_KEY=sk-proj-yourActualKeyHere
+```
+
+**PowerShell:**
+```powershell
+$env:OPENAI_API_KEY="sk-proj-yourActualKeyHere"
+```
+
+**Linux / macOS:**
+```bash
+export OPENAI_API_KEY="sk-proj-yourActualKeyHere"
 ```
 
 ---
 
-## 💻 Usage
+## 💻 Running the Batch Inspection
 
-### 1. Prepare your Data
-Ensure your PCB images (e.g., `100_input.png`) are located in the `inputs/` folder.
-*(Optional)* Create a `metadata.csv` in the root folder to map images to specific components:
-```csv
-filename,component_ref,issue_symptom
-100_input.png,U12,AOI flagged anomaly
-101_input.png,C42,Possible short circuit
-```
+Place your AOI image folders inside the `inputs/` directory.
 
-### 2. Run the Batch Processor
-Execute the main script from your terminal:
+Execute the batch evaluation pipeline:
 ```bash
 python main.py
 ```
 
-### 3. View the Results
-The agent will process the images (defaulting to the first 5 images for testing purposes). Once completed, it generates an `inspection_results.json` file in the root directory.
+### Sample Console Output:
+```text
+INFO: Found total of 250 images across all board assemblies.
+INFO: Starting batch evaluation on 5 images...
 
-**Example Output:**
+INFO: ▶ Processing: C636 on Board 06-200036-02
+INFO:   Ground Truth: 'missing part'
+INFO:   Tool 1 [MCP]: Gathering Context for C636
+INFO:   Tool 2: Gathering Visual Evidence via LLaVA
+INFO:   Tool 3 [MCP]: Gathering Electrical & Height Telemetry
+INFO:   Tool 4 [OpenAI]: Executing Reasoning & Self-Check
+INFO:   ✔ Prediction: 'missing part' [MATCH!]
+
+INFO: ▶ Processing: C978 on Board 06-200036-02
+INFO:   Ground Truth: 'wrong part'
+INFO:   ✔ Prediction: 'wrong part' [MATCH!]
+
+==========================================
+BATCH COMPLETE! Accuracy: 5/5 (100.0%)
+Results saved to inspection_results.json
+==========================================
+```
+
+---
+
+## 📊 Sample Output Report (`inspection_results.json`)
+
 ```json
 [
     {
-        "board_id": "100",
-        "component_ref": "U12",
-        "file_name": "100_input.png",
-        "defect_category": "tombstone",
-        "confidence": 0.92,
-        "diagnosis": "The capacitor is detached at one pad and standing vertically due to uneven reflow heating. Historical cases confirm this behavior under similar oven profiles.",
+        "file_name": "Board1_C636_Body_06-200036-02_20260824_193317036_MissingPart_3.jpg",
+        "board_id": "06-200036-02",
+        "component_ref": "C636",
+        "ground_truth": "missing part",
+        "predicted_defect": "missing part",
+        "is_correct": true,
+        "confidence": 0.96,
+        "diagnosis": "The capacitor is completely absent from its designated SMD pads. Electrical telemetry confirms an open circuit (resistance > 999k Ohms) and 0 um laser height profile, fully corroborating the visual absence.",
         "self_check_passed": true,
         "errors": []
     }
@@ -128,7 +221,7 @@ The agent will process the images (defaulting to the first 5 images for testing 
 
 ---
 
-## 🛠 Configuration & Customization
+## 🛠️ Production Extensibility
 
-* **Process All Images:** In `main.py`, change `test_files = all_files[:5]` to `test_files = all_files` to run your entire dataset.
-* **Adding Real Databases:** Open `src/models/model_registry.py` and replace `MockMeasurementSystem`, `MockCaseDB`, and `MockDetector` with standard API calls to your factory's actual MES/ICT databases.
+* **Connect Real Factory Systems:** Edit `src/mcp/pcb_mcp_server.py` to route `@mcp.tool()` functions to your live factory Manufacturing Execution System (MES), AOI machines, or physical In-Circuit Testers.
+* **Full Batch Run:** In `main.py`, update `test_batch = all_images[:5]` to `test_batch = all_images` to evaluate all images in the dataset.
