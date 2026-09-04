@@ -1,7 +1,14 @@
 # src/mcp/pcb_mcp_server.py
 import logging
 from typing import Dict, Any, List
-from mcp.server.fastmcp import FastMCP
+
+# Standalone FastMCP import
+try:
+    from fastmcp import FastMCP
+except ImportError:
+    # Fallback for older/alternative MCP SDK versions
+    from mcp.server.mcpserver import MCPServer as FastMCP
+
 from src.data.qdrant_store import DefectVectorStore
 
 logger = logging.getLogger(__name__)
@@ -18,7 +25,6 @@ vector_store = DefectVectorStore()
 def search_historical_defects(component_ref: str, top_k: int = 3) -> List[Dict[str, Any]]:
     """Search Qdrant vector database for visually similar past defect cases for a component."""
     logger.info(f"[MCP Server] Querying historical cases for {component_ref}")
-    # Using default zero-embedding for query matching
     results = vector_store.search_similar(
         embedding=[0.0] * 512,
         top_k=top_k,
@@ -40,7 +46,6 @@ def get_ipc_standards(component_ref: str) -> Dict[str, str]:
 def get_ict_measurements(board_id: str, component_ref: str) -> Dict[str, Any]:
     """Query In-Circuit Testing (ICT) electrical telemetry and 3D AOI laser profiles."""
     logger.info(f"[MCP Server] Fetching ICT measurements for {board_id} - {component_ref}")
-    # In production, replace with query to real ICT / AOI backend
     return {
         "board_id": board_id,
         "component_ref": component_ref,
@@ -50,9 +55,10 @@ def get_ict_measurements(board_id: str, component_ref: str) -> Dict[str, Any]:
         "solder_volume_percentage": 15.2
     }
 
-# Python Client wrapper to invoke MCP tools directly inside LangGraph
+# ── Client Interface for LangGraph ───────────────────────────────────────────
+
 class PCBToolClient:
-    """Client interface for interacting with the PCB MCP Tool Server."""
+    """Client interface for invoking MCP tools inside LangGraph nodes."""
     def search_historical(self, component_ref: str) -> List[Dict[str, Any]]:
         return search_historical_defects(component_ref=component_ref)
         
