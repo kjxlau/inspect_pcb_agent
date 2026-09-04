@@ -53,6 +53,20 @@ The system passes a `PCBInspectionState` dictionary through 4 primary Agent Node
 4. **Tool 4: Reasoning & Grounding (`model_registry.py` -> `Llama 3.1`)** 
    Synthesizes the visual description, historical context, and physical measurements. It cross-checks visual claims against physical data to detect contradictions and outputs a final JSON diagnosis.
 
+┌─────────────────────────────────────────────────────────┐
+ │                   LangGraph Workflow                    │
+ │                                                         │
+ │  [Tool 1: Context]  ───┐                                │
+ │  [Tool 2: Visual]   ───┼──► OpenAI (GPT-4o Reasoning)  │
+ │  [Tool 3: Measure]  ───┘   (Structured JSON Output)     │
+ └─────────────┬───────────────────────────────────────────┘
+               │ Calls via MCP Protocol
+ ┌─────────────▼───────────────────────────────────────────┐
+ │                    PCB MCP Server                       │
+ │  • search_historical_defects (Qdrant Vector RAG)        │
+ │  • get_ipc_standards (Case DB)                          │
+ │  • get_ict_measurements (ICT / Laser Profile System)    │
+ └─────────────────────────────────────────────────────────┘
 ---
 
 ## 🚀 Setup & Installation
@@ -65,7 +79,6 @@ The system passes a `PCBInspectionState` dictionary through 4 primary Agent Node
 Open your terminal / command prompt and pull the required models into Ollama:
 ```bash
 ollama pull llava
-ollama pull llama3.1
 ```
 
 ### 3. Install Python Dependencies
