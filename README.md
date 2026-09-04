@@ -52,7 +52,7 @@ The system passes a `PCBInspectionState` dictionary through 4 primary Agent Node
    Queries backend databases (simulated) for physical/electrical measurements (e.g., In-Circuit Test resistance, 3D AOI height).
 4. **Tool 4: Reasoning & Grounding (`model_registry.py` -> `Llama 3.1`)** 
    Synthesizes the visual description, historical context, and physical measurements. It cross-checks visual claims against physical data to detect contradictions and outputs a final JSON diagnosis.
-
+```
 ┌─────────────────────────────────────────────────────────┐
  │                   LangGraph Workflow                    │
  │                                                         │
@@ -67,6 +67,7 @@ The system passes a `PCBInspectionState` dictionary through 4 primary Agent Node
  │  • get_ipc_standards (Case DB)                          │
  │  • get_ict_measurements (ICT / Laser Profile System)    │
  └─────────────────────────────────────────────────────────┘
+```
 ---
 
 ## 🚀 Setup & Installation
