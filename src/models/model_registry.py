@@ -3,24 +3,27 @@ import io
 import os
 import json
 import logging
-from dotenv import load_dotenv
 from PIL import Image
-from openai import OpenAI
 import ollama
 
-# Load .env variables into os.environ automatically
-load_dotenv()
+# 1. Import and run dotenv BEFORE initializing OpenAI
+from dotenv import load_dotenv
+load_dotenv()  # This forces Python to read your .env file immediately
+
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
 class OpenAIReasoningModel:
-    """Uses OpenAI GPT-4o for high-precision diagnostic reasoning and self-check."""
     def __init__(self, model_name: str = "gpt-4o"):
         self.model_name = model_name
+        
+        # 2. Fetch the key safely
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError(
-                "OPENAI_API_KEY is not set. Please set it in your .env file or environment variables."
+                "OPENAI_API_KEY is not set! Please check that your .env file exists "
+                "in the root directory and contains OPENAI_API_KEY=sk-..."
             )
         self.client = OpenAI(api_key=api_key)
 
@@ -41,11 +44,7 @@ class OpenAIReasoningModel:
         )
         return response.choices[0].message.content or "{}"
 
-
-# ── Vision Model (Local LLaVA via Ollama) ───────────────────────────────────
-
 class LocalLLaVAModel:
-    """Vision-Language Model using local LLaVA via Ollama."""
     def __init__(self, model_name: str = "llava"):
         self.model_name = model_name
 
@@ -63,7 +62,6 @@ class LocalLLaVAModel:
         )
         return response.get('response', '')
 
-
 class MockDetector:
     def detect(self, image):
         return {"defects": [{"box": [10, 10, 50, 50], "class": "anomaly"}]}
@@ -71,9 +69,6 @@ class MockDetector:
 class MockImageEncoder:
     def encode(self, image):
         return [0.0] * 512
-
-
-# ── Registry ─────────────────────────────────────────────────────────────────
 
 class ModelRegistry:
     def __init__(self):
