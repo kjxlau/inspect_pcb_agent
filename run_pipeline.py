@@ -7,8 +7,8 @@ from orchestrator_agent import orchestrator_handle_event
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-INPUT_DIR = r"C:\Users\kenny\Desktop\Semicon Agents\Explainability_Review_Agent\inputs"
-OUTPUT_FILE = r"outputs\batch_inspection_results.json"
+INPUT_DIR = r"\inputs"
+OUTPUT_FILE = r"\outputs\batch_inspection_results.json"
 
 
 def parse_filename_metadata(filename: str):
