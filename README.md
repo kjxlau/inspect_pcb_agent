@@ -1,9 +1,3 @@
-Here is the updated, comprehensive **`README.md`**. 
-
-It accurately reflects your latest architecture: **Agent-to-Agent (A2A) protocol** for inter-agent delegation, **Model Context Protocol (MCP)** for internal tool access, multi-modal evidence synthesis, and the required two-terminal execution workflow.
-
-***
-
 # 🔍 Multi-Agent PCB Defect Inspection & Explainability System
 
 An industrial-grade, multi-agent inspection system for Printed Circuit Boards (PCBs) built using **LangGraph**, the **Agent2Agent (A2A) Protocol**, and the **Model Context Protocol (MCP)**. 
