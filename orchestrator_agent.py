@@ -1,100 +1,125 @@
-# orchestrator_agent.py
-import uuid
+# run_pipeline.py
+import os
+import json
 import logging
-import httpx
+from orchestrator_agent import orchestrator_handle_event
 
-# 1. Intra-Agent: Import Agent 1 MCP Tools
-from src.mcp.agent1_mcp_server import confidence_decision_tool, audit_logging_tool
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
 
-# 2. Inter-Agent: A2A Protocol Models
-from src.a2a.protocol import AgentCard, A2ATaskRequest, A2ATaskResponse
-
-logger = logging.getLogger("Agent1-Orchestrator")
-logging.basicConfig(level=logging.INFO)
-
-AGENT_2_DISCOVERY = "http://127.0.0.1:8001/.well-known/agent.json"
-
-class A2AInterAgentClient:
-    """Handles communication with other agents using the A2A protocol."""
-    def __init__(self, discovery_url: str):
-        self.discovery_url = discovery_url
-        self.card: AgentCard = None
-
-    def discover(self):
-        with httpx.Client() as client:
-            resp = client.get(self.discovery_url)
-            resp.raise_for_status()
-            self.card = AgentCard(**resp.json())
-            logger.info(f"[A2A Client] Discovered: {self.card.name} at {self.card.endpoint}")
-
-    def delegate_task(self, skill_id: str, input_data: dict) -> dict:
-        if not self.card:
-            self.discover()
-
-        req = A2ATaskRequest(
-            task_id=f"a2a_{uuid.uuid4().hex[:8]}",
-            skill_id=skill_id,
-            input_data=input_data
-        )
-
-        with httpx.Client(timeout=120.0) as client:
-            resp = client.post(self.card.endpoint, json=req.model_dump())
-            resp.raise_for_status()
-            task_resp = A2ATaskResponse(**resp.json())
-
-            if task_resp.state == "completed":
-                return task_resp.result
-            raise RuntimeError(f"A2A Task error: {task_resp.error}")
-
-a2a_agent2 = A2AInterAgentClient(AGENT_2_DISCOVERY)
+INPUT_DIR = r"\inputs"
+OUTPUT_FILE = r"\outputs\batch_inspection_results.json"
 
 
-def orchestrator_handle_event(board_id: str, component_ref: str, image_path: str) -> dict:
-    logger.info(f"\n=== [AOI Inspection Event] Board: {board_id}, Component: {component_ref} ===")
+def parse_filename_metadata(filename: str):
+    """Extracts component_ref, board_id, and ground truth from the AOI filename."""
+    stem = os.path.splitext(filename)[0]
+    tokens = stem.split("_")
+    
+    meta = {
+        "board_id": "Unknown",
+        "component_ref": "Unknown",
+        "ground_truth": "unknown"
+    }
 
-    # Step 1: Core ADC Service (simulated 1st-stage baseline classifier)
-    adc_prediction = "missing part"
-    adc_confidence = 0.58  # Low confidence
+    if len(tokens) >= 7:
+        meta["component_ref"] = tokens[1]
+        meta["board_id"] = tokens[3]
+        
+        raw_gt = tokens[6].lower()
+        if "missing" in raw_gt:
+            meta["ground_truth"] = "missing part"
+        elif "shift" in raw_gt:
+            meta["ground_truth"] = "shifted"
+        elif "wrong" in raw_gt:
+            meta["ground_truth"] = "wrong part"
+        elif "foreign" in raw_gt:
+            meta["ground_truth"] = "foreign material"
+        elif "tombstone" in raw_gt:
+            meta["ground_truth"] = "tombstone"
+        elif "solder" in raw_gt:
+            meta["ground_truth"] = "solder insufficient"
+        elif "golden" in raw_gt:
+            meta["ground_truth"] = "no defect"
 
-    # Step 2: Use Agent 1's MCP Tool to decide next step
-    decision = confidence_decision_tool(confidence=adc_confidence, threshold=0.85)
-    audit_logging_tool("CORE_ADC_INFERENCE", {"prediction": adc_prediction, "confidence": adc_confidence})
+    return meta
 
-    # Step 3: Conditional Routing
-    if decision["escalation_required"]:
-        logger.warning("[Agent 1] Low confidence detected. Initiating A2A delegation to Agent 2...")
 
-        # ⭐ Inter-Agent Communication via A2A Protocol
-        agent2_result = a2a_agent2.delegate_task(
-            skill_id="pcb.explainability.audit",
-            input_data={
-                "board_id": board_id,
-                "component_ref": component_ref,
-                "image_path": image_path,
-                "issue_symptom": f"ADC reported {adc_prediction} with low confidence ({adc_confidence})"
-            }
-        )
+def find_all_images(base_dir: str):
+    """Recursively finds all defect images inside 'Passed' subfolders."""
+    image_paths = []
+    for root, _, files in os.walk(base_dir):
+        if "passed" in root.lower():
+            for f in files:
+                if f.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    image_paths.append(os.path.join(root, f))
+    return image_paths
 
-        logger.info("[Agent 1] Received A2A completed audit from Agent 2:")
-        logger.info(f"  • Category: {agent2_result.get('defect_category')}")
-        logger.info(f"  • Grounding Conf: {agent2_result.get('confidence_score')}")
-        logger.info(f"  • Self-Check Passed: {agent2_result.get('self_check_passed')}")
-        logger.info(f"  • Diagnosis: {agent2_result.get('diagnosis_text')}")
 
-        # Log escalation to audit tool via MCP
-        audit_logging_tool("A2A_ESCALATION_COMPLETE", {"result": agent2_result})
-        logger.info("--> Routing packet to [Human Reviewer] for final signoff.")
+def extract_agent2_reasoning(agent2_res: dict) -> str:
+    """Extracts the reasoning / diagnosis produced by Agent 2."""
+    if not isinstance(agent2_res, dict):
+        return "No reasoning returned by Agent 2."
+    
+    # Priority order for Agent 2 explanation fields:
+    # 1. diagnosis_text (Agent 2 standard field)
+    # 2. reasoning / explanation
+    for key in ["diagnosis_text", "reasoning", "explanation", "rationale"]:
+        val = agent2_res.get(key)
+        if val:
+            return str(val)
+            
+    return "No diagnosis text found."
 
-        # Return Agent 2's audit result
-        return agent2_result
-    else:
-        logger.info("[Agent 1] High confidence. Auto-accepted.")
-        audit_logging_tool("AUTO_ACCEPT_CLASSIFICATION", {"prediction": adc_prediction})
 
-        return {
-            "defect_category": adc_prediction,
-            "confidence_score": adc_confidence,
-            "self_check_passed": True,
-            "diagnosis_text": "High confidence prediction auto-accepted by Agent 1 baseline ADC.",
-            "escalated": False
-        }
+def main():
+    all_images = find_all_images(INPUT_DIR)
+    logger.info(f"Discovered {len(all_images)} total images in {INPUT_DIR}")
+
+    if not all_images:
+        logger.error("No images found! Check your inputs directory.")
+        return
+
+    # Run on first 5 images for test
+    batch_images = all_images[:5]
+    logger.info(f"Running batch pipeline on {len(batch_images)} images...\n")
+
+    results = []
+    for idx, img_path in enumerate(batch_images, 1):
+        filename = os.path.basename(img_path)
+        meta = parse_filename_metadata(filename)
+
+        logger.info(f"[{idx}/{len(batch_images)}] Processing: {meta['component_ref']} on Board {meta['board_id']}")
+        logger.info(f"   Ground Truth: '{meta['ground_truth']}'")
+
+        try:
+            agent2_output = orchestrator_handle_event(
+                board_id=meta["board_id"],
+                component_ref=meta["component_ref"],
+                image_path=img_path
+            )
+
+            reasoning = extract_agent2_reasoning(agent2_output)
+            logger.info(f"   Agent 2 Reasoning: {reasoning[:120]}...\n")
+
+            results.append({
+                "filename": filename,
+                "metadata": meta,
+                "agent_2_reasoning": reasoning,
+                "agent_2_output": agent2_output
+            })
+        except Exception as e:
+            logger.error(f"Failed processing {filename}: {e}", exc_info=True)
+
+    os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=4, default=str)
+
+    logger.info(f"==========================================")
+    logger.info(f"Batch completed! Processed {len(results)} images.")
+    logger.info(f"Saved results to: {OUTPUT_FILE}")
+    logger.info(f"==========================================")
+
+
+if __name__ == "__main__":
+    main()
