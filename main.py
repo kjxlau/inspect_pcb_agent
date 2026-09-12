@@ -3,16 +3,25 @@ import sys
 import json
 import logging
 import argparse
+import urllib.request
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from PIL import Image
 
-# 1. MUST load .env BEFORE importing agent (which initializes OpenAI)
+# 1. Environment & API Key Setup (supports both .env and Colab Secrets)
 from dotenv import load_dotenv
 load_dotenv()
 
+# Check Google Colab userdata secrets if not in environment
+try:
+    from google.colab import userdata
+    if not os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = userdata.get("OPENAI_API_KEY")
+except (ImportError, Exception):
+    pass
+
 if not os.environ.get("OPENAI_API_KEY"):
-    print("CRITICAL WARNING: OPENAI_API_KEY is not set in environment or .env file!")
+    print("CRITICAL WARNING: OPENAI_API_KEY is not set in environment, .env, or Colab Secrets!")
 
 # 2. Import compiled LangGraph workflow & State
 from agent import pcb_graph, PCBInspectionState
@@ -20,8 +29,21 @@ from agent import pcb_graph, PCBInspectionState
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-DEFAULT_INPUT_DIR = r"./inputs"
+# Auto-detect Colab paths vs standard relative paths
+COLAB_BASE_DIR = Path("/content/inspect_pcb_agent/inputs")
+DEFAULT_INPUT_DIR = str(COLAB_BASE_DIR) if COLAB_BASE_DIR.exists() else "./inputs"
 DEFAULT_OUTPUT_FILE = "inspection_results.json"
+
+
+# ── Colab / Ollama Pre-flight Check ──────────────────────────────────────────
+
+def check_ollama_service() -> bool:
+    """Verifies that Ollama server is running locally (required for LLaVA node)."""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=3) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
 
 
 # ── Metadata Parser ──────────────────────────────────────────────────────────
@@ -30,7 +52,6 @@ def parse_filename_metadata(file_path: str) -> Dict[str, str]:
     """
     Extracts metadata from filenames like:
     'Board1_C978_Body_06-200036-02_20260824_154737922_WrongPart_13.jpg'
-    or 'Board3_R131_Body_18-010309-AAA-RV3_20260824_100501995_Shift_4.jpg'
     """
     stem = Path(file_path).stem
     tokens = stem.split("_")
@@ -43,10 +64,9 @@ def parse_filename_metadata(file_path: str) -> Dict[str, str]:
     }
 
     if len(tokens) >= 7:
-        meta["component_ref"] = tokens[1]    # e.g., C978, R131
-        meta["board_id"] = tokens[3]         # e.g., 06-200036-02, 18-010309-AAA-RV3
+        meta["component_ref"] = tokens[1]
+        meta["board_id"] = tokens[3]
         
-        # Normalize ground truth defect name
         raw_gt = tokens[6].lower()
         if "missing" in raw_gt:
             meta["ground_truth"] = "missing part"
@@ -77,14 +97,27 @@ def parse_filename_metadata(file_path: str) -> Dict[str, str]:
 
 def run_agent_on_image(image_path: str, meta: Optional[Dict[str, str]] = None) -> PCBInspectionState:
     """Executes the full LangGraph agent workflow on a given image."""
-    if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Image not found at {image_path}")
+    abs_path = str(Path(image_path).resolve())
+    if not os.path.exists(abs_path):
+        raise FileNotFoundError(f"Image not found at {abs_path}")
+
+    # Ollama health check before calling graph
+    if not check_ollama_service():
+        logger.warning(
+            "Ollama does not appear to be running on http://127.0.0.1:11434!\n"
+            "If the visual inspection fails, start Ollama in Colab using:\n"
+            "  !curl -fsSL https://ollama.com/install.sh | sh\n"
+            "  !nohup ollama serve > ollama.log 2>&1 &\n"
+            "  !ollama pull llava\n"
+        )
 
     if not meta:
-        meta = parse_filename_metadata(image_path)
+        meta = parse_filename_metadata(abs_path)
 
+    # Note: image_path is explicitly included here for node2 / visual tool
     initial_state: PCBInspectionState = {
-        "image": Image.open(image_path).convert("RGB"),
+        "image_path": abs_path,
+        "image": Image.open(abs_path).convert("RGB"),
         "board_id": meta.get("board_id", "Unknown"),
         "component_ref": meta.get("component_ref", "Unknown"),
         "issue_symptom": meta.get("issue_symptom", "AOI anomaly review"),
@@ -104,26 +137,26 @@ def run_agent_on_image(image_path: str, meta: Optional[Dict[str, str]] = None) -
     return pcb_graph.invoke(initial_state)
 
 
-# ── Display Formatter (from run_agent.py) ────────────────────────────────────
+# ── Display Formatter ────────────────────────────────────────────────────────
 
 def print_engineering_report(state: PCBInspectionState, ground_truth: Optional[str] = None):
     """Prints a structured engineering report for human review."""
     print("\n" + "=" * 60)
     print("        PCB DEFECT EXPLAINABILITY REVIEW REPORT")
     print("=" * 60)
-    print(f"Board Assembly ID:    {state['board_id']}")
-    print(f"Component Reference:  {state['component_ref']}")
+    print(f"Board Assembly ID:    {state.get('board_id', 'Unknown')}")
+    print(f"Component Reference:  {state.get('component_ref', 'Unknown')}")
+    final_pred = state.get('final_defect_category', 'unknown')
     if ground_truth:
-        match_icon = "MATCH" if state['final_defect_category'] == ground_truth else "MISMATCH"
+        match_icon = "MATCH" if final_pred == ground_truth else "MISMATCH"
         print(f"Ground Truth:         {ground_truth.upper()}")
-        print(f"Final Prediction:     {state['final_defect_category'].upper()} [{match_icon}]")
+        print(f"Final Prediction:     {final_pred.upper()} [{match_icon}]")
     else:
-        print(f"Final Prediction:     {state['final_defect_category'].upper()}")
+        print(f"Final Prediction:     {final_pred.upper()}")
         
-    print(f"Confidence Score:     {state['grounding_confidence'] * 100:.1f}%")
-    print(f"Grounding Self-Check: {'PASSED' if state['self_check_passed'] else 'FAILED'}")
+    print(f"Confidence Score:     {state.get('grounding_confidence', 0.0) * 100:.1f}%")
+    print(f"Grounding Self-Check: {'PASSED' if state.get('self_check_passed') else 'FAILED'}")
 
-    # ── Defect Location Section ───────────────────────────────────────────────
     defect_loc = state.get("defect_location")
     if isinstance(defect_loc, dict):
         landmark = defect_loc.get("landmark", "Unspecified")
@@ -140,23 +173,25 @@ def print_engineering_report(state: PCBInspectionState, ground_truth: Optional[s
 
     print("-" * 60)
     print("PHYSICAL ROOT-CAUSE & IPC COMPLIANCE EXPLANATION:")
-    print(state["final_diagnosis_text"])
+    print(state.get("final_diagnosis_text", ""))
     
     if state.get("errors"):
         print("-" * 60)
         print(f"Warnings/Errors: {state['errors']}")
     print("=" * 60 + "\n")
 
+
 # ── Image Finder ─────────────────────────────────────────────────────────────
 
 def find_all_images(base_dir: str) -> List[str]:
     """Recursively finds all defect images inside Passed/ subfolders."""
     image_paths = []
-    if not os.path.exists(base_dir):
-        logger.error(f"Input directory does not exist: {base_dir}")
+    base_path = Path(base_dir).resolve()
+    if not base_path.exists():
+        logger.error(f"Input directory does not exist: {base_path}")
         return image_paths
 
-    for root, _, files in os.walk(base_dir):
+    for root, _, files in os.walk(str(base_path)):
         if "passed" in root.lower():
             for f in files:
                 if f.lower().endswith(('.jpg', '.jpeg', '.png')):
@@ -198,7 +233,7 @@ def run_batch_mode(input_dir: str, limit: int = 10, output_file: str = DEFAULT_O
 
         try:
             final_state = run_agent_on_image(img_path, meta)
-            predicted_cat = final_state["final_defect_category"].lower()
+            predicted_cat = final_state.get("final_defect_category", "unknown").lower()
             is_correct = (predicted_cat == meta["ground_truth"])
 
             if is_correct:
@@ -210,25 +245,24 @@ def run_batch_mode(input_dir: str, limit: int = 10, output_file: str = DEFAULT_O
             results.append({
                 "file_name": filename,
                 "file_path": img_path,
-                "board_id": final_state["board_id"],
-                "component_ref": final_state["component_ref"],
+                "board_id": final_state.get("board_id"),
+                "component_ref": final_state.get("component_ref"),
                 "ground_truth": meta["ground_truth"],
                 "predicted_defect": predicted_cat,
                 "defect_location": final_state.get("defect_location"),
                 "is_correct": is_correct,
-                "confidence": final_state["grounding_confidence"],
-                "self_check_passed": final_state["self_check_passed"],
-                "diagnosis": final_state["final_diagnosis_text"],
-                "errors": final_state["errors"]
+                "confidence": final_state.get("grounding_confidence"),
+                "self_check_passed": final_state.get("self_check_passed"),
+                "diagnosis": final_state.get("final_diagnosis_text"),
+                "errors": final_state.get("errors")
             })
 
         except Exception as exc:
             logger.error(f"Failed to process {filename}: {exc}")
 
-    # Summary
     acc = (correct_count / len(test_batch)) * 100 if test_batch else 0
     print("\n" + "=" * 50)
-    print(f"BATCH EVALUATION COMPLETE")
+    print("BATCH EVALUATION COMPLETE")
     print(f"Accuracy: {correct_count}/{len(test_batch)} ({acc:.1f}%)")
     print(f"Results saved to: {output_file}")
     print("=" * 50 + "\n")
@@ -247,19 +281,20 @@ def main():
     parser.add_argument("--dir", type=str, default=DEFAULT_INPUT_DIR, help="Base input folder path.")
     parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT_FILE, help="Output JSON results filename.")
 
-    args = parser.parse_args()
+    # Filter out Jupyter/IPython internal arguments when running in notebooks
+    clean_argv = [a for a in sys.argv[1:] if not a.startswith("-f") and "kernel" not in a]
+    args = parser.parse_args(clean_argv)
 
     if args.image:
         run_single_image_mode(args.image)
     elif args.batch:
         run_batch_mode(input_dir=args.dir, limit=args.limit, output_file=args.output)
     else:
-        # Default behavior if no flags passed: look for images and run single or first batch test
         all_images = find_all_images(args.dir)
         if all_images:
-            print("No mode flag passed. Inspecting first found image as a sample test:")
+            print(f"Inspecting first found image in '{args.dir}':")
             run_single_image_mode(all_images[0])
-            print("\nTip: To run batch evaluation on 10 images, run:\n  python main.py --batch --limit 10")
+            print("\nTip: To run batch evaluation on 10 images, run:\n  !python main.py --batch --limit 10")
         else:
             logger.warning(f"No images found in {args.dir}. Specify an image with --image <path>.")
 
