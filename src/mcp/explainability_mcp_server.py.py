@@ -1,4 +1,23 @@
-"""Consolidated FastMCP Tool definitions for the Monolithic PCB Explainability Agent."""
+import os
+from pathlib import Path
+
+# Define base path
+BASE = Path("/content/inspect_pcb_agent")
+
+# 1. Create directories
+(BASE / "src" / "mcp").mkdir(parents=True, exist_ok=True)
+(BASE / "src" / "models").mkdir(parents=True, exist_ok=True)
+(BASE / "src" / "data").mkdir(parents=True, exist_ok=True)
+
+# 2. Ensure __init__.py files exist
+for pkg_dir in [BASE / "src", BASE / "src" / "mcp", BASE / "src" / "models", BASE / "src" / "data"]:
+    init_file = pkg_dir / "__init__.py"
+    if not init_file.exists():
+        init_file.touch()
+        print(f"Created: {init_file}")
+
+# 3. Write the exact explainability_mcp_server.py
+server_code = '''"""Consolidated FastMCP Tool definitions for the Monolithic PCB Explainability Agent."""
 
 from __future__ import annotations
 
@@ -56,18 +75,16 @@ def case_context_retrieval_tool(
     issue_symptom: str = ""
 ) -> Dict[str, Any]:
     """Retrieves relevant IPC-A-610 Class 2/3 inspection criteria, AOI detection
-
     whitepapers, and defect troubleshooting literature from local Qdrant.
     """
     logger.info(f"Context Retrieval Query: comp={component_ref}, board={board_id}, symptom={issue_symptom}")
 
-    # Fallback standard summary if vector DB returns no hits
     default_ipc_standard = (
-        "IPC-A-610 Class 2/3 Acceptability Requirements:\n"
-        "- Missing Part: Component absent from designated land pattern.\n"
-        "- Shifted: Maximum allowable side overhang is <= 50% of component termination width.\n"
-        "- Tombstone: Component detached at one end; tilt angle > 0 deg with lifted terminal.\n"
-        "- Solder Insufficient: Fillet height < 25% of component termination height.\n"
+        "IPC-A-610 Class 2/3 Acceptability Requirements:\\n"
+        "- Missing Part: Component absent from designated land pattern.\\n"
+        "- Shifted: Maximum allowable side overhang is <= 50% of component termination width.\\n"
+        "- Tombstone: Component detached at one end; tilt angle > 0 deg with lifted terminal.\\n"
+        "- Solder Insufficient: Fillet height < 25% of component termination height.\\n"
         "- Foreign Material: Debris, flux residue, or solder splatter bridging conductors."
     )
 
@@ -76,7 +93,6 @@ def case_context_retrieval_tool(
     try:
         from src.data.qdrant_store import query_defect_precedents
 
-        # Construct a dense search query prioritizing the flagged symptom and component type
         query_text = (
             f"Defect symptom '{issue_symptom}' on component {component_ref} board {board_id}. "
             f"IPC-A-610 acceptance criteria, causes, AOI detection, and prevention."
@@ -87,7 +103,6 @@ def case_context_retrieval_tool(
     except Exception as exc:
         logger.warning(f"Qdrant retrieval fallback triggered: {exc}")
 
-    # Format the retrieved documents into structured textual context
     if retrieved_documents:
         formatted_sections = []
         for i, doc in enumerate(retrieved_documents, 1):
@@ -96,9 +111,9 @@ def case_context_retrieval_tool(
             score = doc.get("score", 0.0)
             text = doc.get("text", "").strip()
             formatted_sections.append(
-                f"[Document {i}] Source: {source}{page} | Similarity: {score}\n{text}"
+                f"[Document {i}] Source: {source}{page} | Similarity: {score}\\n{text}"
             )
-        retrieved_context_text = "\n\n".join(formatted_sections)
+        retrieved_context_text = "\\n\\n".join(formatted_sections)
     else:
         retrieved_context_text = default_ipc_standard
 
@@ -128,22 +143,18 @@ def visual_evidence_tool(image_path: str, prompt: str) -> Dict[str, Any]:
 @mcp.tool()
 def measurement_evidence_tool(image_path: str, component_ref: str, board_id: str) -> Dict[str, Any]:
     """Fetches physical 3D AOI (laser height profile, coplanarity, side overhang)
-
     and ICT (In-Circuit Testing resistance/capacitance) telemetry.
     """
     telemetry_db = _load_telemetry()
     filename = Path(image_path).name
 
-    # 1. Exact match lookup by filename
     if filename in telemetry_db:
         return telemetry_db[filename]
 
-    # 2. Key-match lookup by component reference & board id
     for item in telemetry_db.values():
         if item.get("component_ref") == component_ref and item.get("board_id") == board_id:
             return item
 
-    # 3. Default nominal measurement fallback
     logger.info(f"Telemetry missing for {filename}. Using default nominal profile.")
     return {
         "board_id": board_id,
@@ -167,24 +178,24 @@ def grounding_and_self_check_tool(reasoning_prompt: str) -> Dict[str, Any]:
     client = _get_openai_client()
 
     system_prompt = (
-        "You are an IPC-A-610 Master Review Inspector for SMT assembly quality assurance.\n"
+        "You are an IPC-A-610 Master Review Inspector for SMT assembly quality assurance.\\n"
         "Your task is to analyze all visual descriptions, physical 3D AOI laser measurements, "
         "electrical ICT readings, and retrieved IPC standards to identify contradictions and determine "
-        "the grounded root cause.\n\n"
-        "CONTRADICTION & REASONING RULES:\n"
+        "the grounded root cause.\\n\\n"
+        "CONTRADICTION & REASONING RULES:\\n"
         "1. Missing Part: An open circuit (R > 10 MOhm or C = 0.0 uF) and laser profile height near 0 um "
-        "overrides visual discoloration or paste presence. Flag as 'missing part'.\n"
-        "2. Shifted: If component overhang > 50% of termination width, flag as 'shifted' under IPC Class 2.\n"
-        "3. Tombstone: Open circuit + one elevated terminal (> 150-250 um) signifies tombstoning.\n"
-        "4. Solder Insufficient: Fillet height < 25% of termination height.\n"
-        "5. Wrong Part: Measured electrical value outside tolerance band or package dimensions mismatch.\n\n"
-        "Respond ONLY with a valid JSON object matching this schema:\n"
-        "{\n"
-        '  "defect_category": "missing part" | "shifted" | "foreign material" | "tombstone" | "solder insufficient" | "wrong part" | "no defect",\n'
-        '  "confidence_score": float (0.0 to 1.0),\n'
-        '  "self_check_passed": bool,\n'
-        '  "defect_location": {"landmark": string, "bounding_box": [y1, x1, y2, x2] or null},\n'
-        '  "explanation": string\n'
+        "overrides visual discoloration or paste presence. Flag as 'missing part'.\\n"
+        "2. Shifted: If component overhang > 50% of termination width, flag as 'shifted' under IPC Class 2.\\n"
+        "3. Tombstone: Open circuit + one elevated terminal (> 150-250 um) signifies tombstoning.\\n"
+        "4. Solder Insufficient: Fillet height < 25% of termination height.\\n"
+        "5. Wrong Part: Measured electrical value outside tolerance band or package dimensions mismatch.\\n\\n"
+        "Respond ONLY with a valid JSON object matching this schema:\\n"
+        "{\\n"
+        '  "defect_category": "missing part" | "shifted" | "foreign material" | "tombstone" | "solder insufficient" | "wrong part" | "no defect",\\n'
+        '  "confidence_score": float (0.0 to 1.0),\\n'
+        '  "self_check_passed": bool,\\n'
+        '  "defect_location": {"landmark": string, "bounding_box": [y1, x1, y2, x2] or null},\\n'
+        '  "explanation": string\\n'
         "}"
     )
 
@@ -199,3 +210,8 @@ def grounding_and_self_check_tool(reasoning_prompt: str) -> Dict[str, Any]:
     )
 
     return json.loads(response.choices[0].message.content)
+'''
+
+target_file = BASE / "src" / "mcp" / "explainability_mcp_server.py"
+target_file.write_text(server_code, encoding="utf-8")
+print(f"Successfully wrote {target_file.stat().st_size} bytes to {target_file}")
