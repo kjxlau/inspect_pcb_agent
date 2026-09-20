@@ -1,99 +1,63 @@
+# src/data/qdrant_store.py
 import logging
-from typing import List, Dict, Any, Optional
+from pathlib import Path
+from typing import List, Dict, Any
 from qdrant_client import QdrantClient
-from qdrant_client.http import models
+from fastembed import TextEmbedding
 
 logger = logging.getLogger(__name__)
 
-class DefectVectorStore:
-    def __init__(self, collection_name: str = "pcb_defects"):
-        # Run Qdrant locally in RAM for prototyping (no server needed)
-        self.client = QdrantClient(":memory:")
-        self.collection_name = collection_name
-        self.vector_size = 512 
-        self._ensure_collection()
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "qdrant_db"
+COLLECTION_NAME = "pcb_standards_precedents"
+EMBED_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
-    def _ensure_collection(self):
-        """Checks if the collection exists, creates it, and seeds fake data."""
-        if not self.client.collection_exists(self.collection_name):
-            logger.info(f"Creating in-memory Qdrant collection '{self.collection_name}'...")
-            
-            self.client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=models.VectorParams(
-                    size=self.vector_size, 
-                    distance=models.Distance.COSINE
-                )
-            )
-            self._seed_dummy_data()
+# Cached instances
+_client = None
+_embedder = None
 
-    def _seed_dummy_data(self):
-        """Injects fake historical cases so your agent has 'past context' to reason with."""
-        dummy_points = [
-            models.PointStruct(
-                id=1,
-                vector=[0.1] * self.vector_size,
-                payload={
-                    "component_ref": "U12",
-                    "defect_category": "missing part",
-                    "root_cause": "Pick & Place nozzle vacuum pressure failure.",
-                    "historical_machine_state": "Nozzle pressure drop detected at Sector 4.",
-                    "corrective_action": "Replaced P&P nozzle and cleaned pneumatic air filters."
-                }
-            ),
-            models.PointStruct(
-                id=2,
-                vector=[0.2] * self.vector_size,
-                payload={
-                    "component_ref": "U12",
-                    "defect_category": "shifted",
-                    "root_cause": "Solder paste offset / Reflow profile mismatch.",
-                    "historical_machine_state": "Zone 3 reflow oven temperature drop by 5 degrees.",
-                    "corrective_action": "Adjusted reflow profile and wiped printing stencil."
-                }
-            )
-        ]
-        
-        self.client.upsert(
-            collection_name=self.collection_name, 
-            points=dummy_points
-        )
-        logger.info("Seeded Qdrant memory database with dummy historical cases.")
 
-    def search_similar(self, embedding: List[float], top_k: int = 3, metadata_filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        """
-        Searches the vector database for historically visually similar defects using query_points.
-        """
-        query_filter = None
-        
-        if metadata_filter:
-            must_conditions = []
-            for key, value in metadata_filter.items():
-                must_conditions.append(
-                    models.FieldCondition(
-                        key=key,
-                        match=models.MatchValue(value=value)
-                    )
-                )
-            query_filter = models.Filter(must=must_conditions)
+def get_qdrant_client() -> QdrantClient:
+    global _client
+    if _client is None:
+        _client = QdrantClient(path=str(DB_PATH))
+    return _client
 
-        # Fallback if embedding is missing or wrong size
-        if not embedding or len(embedding) != self.vector_size:
-            embedding = [0.0] * self.vector_size
 
-        # Perform the Vector Search using the updated API
-        search_result = self.client.query_points(
-            collection_name=self.collection_name,
-            query=embedding,
-            query_filter=query_filter,
-            limit=top_k
-        )
+def get_embedder() -> TextEmbedding:
+    global _embedder
+    if _embedder is None:
+        _embedder = TextEmbedding(model_name=EMBED_MODEL_NAME)
+    return _embedder
 
-        # Format results (query_points returns an object with a .points list)
-        results = []
-        for hit in search_result.points:
-            payload = hit.payload or {}
-            payload["score"] = hit.score
-            results.append(payload)
 
-        return results
+def query_defect_precedents(query_text: str, top_k: int = 3) -> List[Dict[str, Any]]:
+    """Runs a semantic vector search over IPC standards and defect documents."""
+    client = get_qdrant_client()
+    embedder = get_embedder()
+
+    if not client.collection_exists(COLLECTION_NAME):
+        logger.warning(f"Collection {COLLECTION_NAME} does not exist.")
+        return []
+
+    query_vector = list(embedder.embed([query_text]))[0].tolist()
+
+    # Use query_points (modern qdrant-client API)
+    response = client.query_points(
+        collection_name=COLLECTION_NAME,
+        query=query_vector,
+        limit=top_k,
+        with_payload=True
+    )
+
+    results = []
+    for hit in response.points:
+        payload = hit.payload or {}
+        results.append({
+            "score": round(float(hit.score), 4),
+            "text": payload.get("text", ""),
+            "source": payload.get("source_file", "unknown"),
+            "page": payload.get("page", None)
+        })
+
+    return results
