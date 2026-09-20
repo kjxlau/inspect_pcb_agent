@@ -1,8 +1,8 @@
 # LangGraph Workflow Framework
 langgraph>=0.2.0
 
-# Model Context Protocol (FastMCP)
-mcp>=1.0.0
+# Model Context Protocol (Pinned to v1.x for FastMCP compatibility)
+mcp<2.0.0
 fastmcp>=0.1.0
 
 # Foundation Models & APIs
