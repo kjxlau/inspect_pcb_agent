@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Add project root to sys.path so submodules are always discoverable
+_ROOT = str(Path(__file__).resolve().parent)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 import argparse
 import json
 import logging
 import os
-from pathlib import Path
+import time
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 
@@ -15,15 +23,22 @@ if not os.environ.get("OPENAI_API_KEY"):
 
 from agent import pcb_agent_graph, PCBInspectionState
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S"
+)
 logger = logging.getLogger("main")
 
-DEFAULT_INPUT_DIR = r"inputs"
+DEFAULT_INPUT_DIR = "inputs"
 DEFAULT_OUTPUT_FILE = "outputs/inspection_results.json"
 
 
 def parse_filename_metadata(file_path: str) -> Dict[str, str]:
-    """Parses board_id, component_ref, and ground_truth from image filename."""
+    """Parses board_id, component_ref, and ground_truth from image filename.
+
+    Example: 'Board1_C636_Body_06-200036-02_20260824_193317036_MissingPart_3.jpg'
+    """
     stem = Path(file_path).stem
     tokens = stem.split("_")
 
@@ -66,14 +81,15 @@ def parse_filename_metadata(file_path: str) -> Dict[str, str]:
 
 def run_agent_on_image(image_path: str, meta: Optional[Dict[str, str]] = None) -> PCBInspectionState:
     """Executes the monolithic inspection graph on a single image file."""
-    if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Image not found at: {image_path}")
+    resolved_path = Path(image_path).resolve()
+    if not resolved_path.exists():
+        raise FileNotFoundError(f"Image not found at: {resolved_path}")
 
     if not meta:
-        meta = parse_filename_metadata(image_path)
+        meta = parse_filename_metadata(str(resolved_path))
 
     initial_state: PCBInspectionState = {
-        "image_path": str(Path(image_path).resolve()),
+        "image_path": str(resolved_path),
         "board_id": meta.get("board_id", "Unknown"),
         "component_ref": meta.get("component_ref", "Unknown"),
         "issue_symptom": meta.get("issue_symptom", "AOI defect review"),
@@ -90,22 +106,30 @@ def run_agent_on_image(image_path: str, meta: Optional[Dict[str, str]] = None) -
         "errors": []
     }
 
-    return pcb_agent_graph.invoke(initial_state)
+    start_time = time.time()
+    result_state = pcb_agent_graph.invoke(initial_state)
+    elapsed = time.time() - start_time
+    logger.info(f"Graph execution finished in {elapsed:.2f}s")
+
+    return result_state
 
 
 def print_engineering_report(state: PCBInspectionState, ground_truth: Optional[str] = None):
     """Formats and displays the engineering inspection report."""
-    print("\n" + "=" * 66)
+    print("\n" + "=" * 68)
     print("      PCB MONOLITHIC EXPLAINABILITY INSPECTION REPORT")
-    print("=" * 66)
+    print("=" * 68)
     print(f"Board Assembly ID:    {state['board_id']}")
     print(f"Component Reference:  {state['component_ref']}")
+
+    pred = state["final_defect_category"].upper()
     if ground_truth:
-        match_flag = "MATCH" if state['final_defect_category'] == ground_truth else "MISMATCH"
-        print(f"Ground Truth:         {ground_truth.upper()}")
-        print(f"Final Prediction:     {state['final_defect_category'].upper()} [{match_flag}]")
+        gt_upper = ground_truth.upper()
+        match_flag = "MATCH" if state["final_defect_category"] == ground_truth else "MISMATCH"
+        print(f"Ground Truth:         {gt_upper}")
+        print(f"Final Prediction:     {pred} [{match_flag}]")
     else:
-        print(f"Final Prediction:     {state['final_defect_category'].upper()}")
+        print(f"Final Prediction:     {pred}")
 
     print(f"Confidence Score:     {state['grounding_confidence'] * 100:.1f}%")
     print(f"Grounding Self-Check: {'PASSED' if state['self_check_passed'] else 'FAILED'}")
@@ -114,27 +138,27 @@ def print_engineering_report(state: PCBInspectionState, ground_truth: Optional[s
     if defect_loc:
         print(f"Defect Localization:  {defect_loc}")
 
-    print("-" * 66)
+    print("-" * 68)
     print("PHYSICAL ROOT-CAUSE & IPC COMPLIANCE EXPLANATION:")
     print(state["final_diagnosis_text"])
 
     if state.get("errors"):
-        print("-" * 66)
-        print(f"Warnings/Errors: {state['errors']}")
-    print("=" * 66 + "\n")
+        print("-" * 68)
+        print(f"Warnings/Errors:      {state['errors']}")
+    print("=" * 68 + "\n")
 
 
 def find_all_images(base_dir: str) -> List[str]:
     """Finds all inspection images recursively."""
-    image_paths = []
-    if not os.path.exists(base_dir):
+    image_paths: List[str] = []
+    root_path = Path(base_dir)
+    if not root_path.exists():
         return image_paths
 
-    for root, _, files in os.walk(base_dir):
-        for f in files:
-            if f.lower().endswith((".jpg", ".jpeg", ".png")):
-                image_paths.append(os.path.join(root, f))
-    return image_paths
+    for file_path in root_path.rglob("*"):
+        if file_path.is_file() and file_path.suffix.lower() in {".jpg", ".jpeg", ".png"}:
+            image_paths.append(str(file_path))
+    return sorted(image_paths)
 
 
 def run_batch(input_dir: str, limit: int = 10, output_file: str = DEFAULT_OUTPUT_FILE):
@@ -175,14 +199,15 @@ def run_batch(input_dir: str, limit: int = 10, output_file: str = DEFAULT_OUTPUT
         })
 
     accuracy = (correct_count / len(batch)) * 100 if batch else 0.0
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 54)
     print("BATCH EVALUATION COMPLETED")
     print(f"Accuracy: {correct_count}/{len(batch)} ({accuracy:.1f}%)")
     print(f"Results written to: {output_file}")
-    print("=" * 50 + "\n")
+    print("=" * 54 + "\n")
 
-    os.makedirs(Path(output_file).parent, exist_ok=True)
-    with open(output_file, "w", encoding="utf-8") as f:
+    out_path = Path(output_file)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
 
