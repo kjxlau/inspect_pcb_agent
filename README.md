@@ -1,4 +1,3 @@
-```markdown
 # 🔍 Monolithic PCB Defect Inspection & Explainability Agent
 
 An industrial-grade, monolithic inspection and explainability system for Printed Circuit Boards (PCBs) built using **LangGraph** and the **Model Context Protocol (MCP)**.
@@ -220,4 +219,3 @@ Cited IPC Spec: IPC-A-610 Section 8.3 (Discrete Chip Components - Absence).
 
 * **SECS/GEM & SMT Line Integration:** In `src/mcp/explainability_mcp_server.py`, replace `measurement_evidence_tool` mock lookups with industrial SECS/GEM or REST adapters to fetch real-time telemetry from physical AOI (e.g. Koh Young, CyberOptics) and ICT fixtures (Keysight 3070, Teradyne TestStation).
 * **Continuous Defect Ingestion:** When quality engineers investigate a novel manufacturing defect or validate an escalated failure (`self_check_passed == False`), add the corresponding RCA report to `src/data/ipc_standards/` and re-run `populate_qdrant.py` to immediately expand the agent's diagnostic memory.
-```
