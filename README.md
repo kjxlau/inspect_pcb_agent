@@ -1,4 +1,4 @@
-# 🔍 Monolithic PCB Defect Inspection & Explainability Agent
+# 🔍 PCB Defect Inspection & Explainability Agent
 
 An industrial-grade, monolithic inspection and explainability system for Printed Circuit Boards (PCBs) built using **LangGraph** and the **Model Context Protocol (MCP)**.
 
