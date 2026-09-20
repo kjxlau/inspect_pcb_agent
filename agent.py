@@ -1,13 +1,5 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-# Add project root to sys.path so submodules like src.mcp can be discovered cleanly
-_ROOT = str(Path(__file__).resolve().parent)
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-
 import json
 import logging
 from typing import Any, Dict, List, Literal, Optional, TypedDict
